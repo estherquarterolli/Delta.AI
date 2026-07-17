@@ -9,7 +9,7 @@
 # no free tier — cold start de alguns segundos na primeira request
 # depois de idle).
 
-app = "delta-ai-api"
+app = "delta-ai-api-eq"
 primary_region = "gru"
 
 [build]
