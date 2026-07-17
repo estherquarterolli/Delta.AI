@@ -1,0 +1,20 @@
+[project]
+name = "delta-ai"
+version = "0.1.0"
+description = "Backend FastAPI para o Delta.AI"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115.0",
+  "asyncpg>=0.29.0",
+  "supabase>=2.10.0",
+  "pydantic>=2.8.0",
+  "structlog>=24.4.0",
+  "pytest>=8.3.0",
+  "pytest-asyncio>=0.24.0",
+  "httpx>=0.28.0",
+  "ruff>=0.6.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

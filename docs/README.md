@@ -1,9 +1,9 @@
-# docs/ — Documentação do projeto
+# docs/
 
-- `plano-de-negocio.md` — plano de negócio completo (referenciado no CLAUDE.md da raiz).
-- `arquitetura.md` — visão geral da arquitetura.
-- `adr/` — Architecture Decision Records, um arquivo por decisão: `YYYY-MM-DD-titulo.md`.
-- `costs/` — análises de impacto de custo (`YYYY-MM-DD-analise.md`), geradas pelo `devops-engineer` toda vez que um novo serviço externo é adicionado.
+Esta pasta reúne a documentação de arquitetura, segurança, custo e decisões técnicas do projeto.
 
-Nenhum documento aqui deve conter secret, chave de API ou dado real
-de usuário.
+- [adr/](adr/) — decisões arquiteturais com contexto e justificativa.
+- [security/](security/) — guardrails, privacidade e procedimentos de segurança.
+- [costs/](costs/) — análises de impacto de custo e limites do free tier.
+
+Para começar, use o README da raiz do repositório e o arquivo [.env.example](../.env.example) para configurar os ambientes local e de deploy.

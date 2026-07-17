@@ -2,7 +2,10 @@
 
 Dono: `supabase-architect`. Atualizado a cada migration que altera schema.
 
-Migration de origem deste diagrama: [`supabase/migrations/20260716000000_init_profiles_goals.sql`](../supabase/migrations/20260716000000_init_profiles_goals.sql).
+Migrations de origem deste diagrama:
+[`supabase/migrations/20260716000000_init_profiles_goals.sql`](../supabase/migrations/20260716000000_init_profiles_goals.sql)
+e
+[`supabase/migrations/20260717090000_profiles_add_atividade_consentimento.sql`](../supabase/migrations/20260717090000_profiles_add_atividade_consentimento.sql).
 
 ## Diagrama
 
@@ -23,6 +26,10 @@ erDiagram
         text sexo "CHECK: masculino|feminino|outro|prefiro_nao_informar"
         date data_nascimento "nullable, sanity range 1900-01-01..hoje"
         int altura_cm "nullable, CHECK 50..250"
+        text nivel_atividade "nullable, CHECK sedentario|leve|moderado|intenso|muito_intenso"
+        numeric peso_inicial_kg "nullable, CHECK 20..400, baseline do onboarding"
+        timestamptz aceite_termos_em "nullable no banco, obrigatorio a nivel de app (ver nota abaixo)"
+        bool aceite_data_sharing_ia "NOT NULL default false, opt-in pra IA"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -68,15 +75,35 @@ separadas (ver abaixo).
 
 | Coluna            | Tipo          | Constraint                                                              | Nota LGPD |
 |-------------------|---------------|--------------------------------------------------------------------------|-----------|
-| `id`              | `uuid`        | PK, FK `auth.users(id)` ON DELETE CASCADE                                | — |
-| `sexo`            | `text`        | CHECK IN (`masculino`, `feminino`, `outro`, `prefiro_nao_informar`), nullable | Dado pessoal comum; não é atributo médico. |
-| `data_nascimento` | `date`        | CHECK entre `1900-01-01` e hoje, nullable                                 | Usado só pra derivar idade sob demanda; idade nunca é armazenada calculada. |
-| `altura_cm`       | `integer`     | CHECK entre 50 e 250, nullable                                            | — |
-| `created_at`      | `timestamptz` | NOT NULL, default `now()`                                                | — |
-| `updated_at`      | `timestamptz` | NOT NULL, default `now()`, mantido por trigger                           | — |
+| `id`                     | `uuid`        | PK, FK `auth.users(id)` ON DELETE CASCADE                                | — |
+| `sexo`                   | `text`        | CHECK IN (`masculino`, `feminino`, `outro`, `prefiro_nao_informar`), nullable | Dado pessoal comum; não é atributo médico. |
+| `data_nascimento`        | `date`        | CHECK entre `1900-01-01` e hoje, nullable                                 | Usado só pra derivar idade sob demanda; idade nunca é armazenada calculada. |
+| `altura_cm`              | `integer`     | CHECK entre 50 e 250, nullable                                            | — |
+| `nivel_atividade`        | `text`        | CHECK IN (`sedentario`,`leve`,`moderado`,`intenso`,`muito_intenso`), nullable | Usado no cálculo de TDEE. |
+| `peso_inicial_kg`        | `numeric(5,2)`| CHECK entre 20 e 400, nullable                                            | Dado de saúde indireto (peso corporal); acessível só via RLS do próprio usuário. |
+| `aceite_termos_em`       | `timestamptz` | **NULLABLE no banco** (obrigatório só a nível de aplicação — ver nota abaixo) | Timestamp do consentimento aos Termos/Privacidade — obrigatório de produto/LGPD, mas não pode ser NOT NULL no Postgres sem quebrar o signup atual. |
+| `aceite_data_sharing_ia` | `boolean`     | NOT NULL, default `false`                                                 | Opt-in explícito pra compartilhar dado anonimizado com o wrapper de IA (Grok). |
+| `created_at`             | `timestamptz` | NOT NULL, default `now()`                                                | — |
+| `updated_at`             | `timestamptz` | NOT NULL, default `now()`, mantido por trigger                           | — |
 
 RLS: `select_own_profiles`, `insert_own_profiles`, `update_own_profiles`,
-`delete_own_profiles` — todas com `auth.uid() = id`.
+`delete_own_profiles` — todas com `auth.uid() = id`. Colunas novas herdam
+essas mesmas policies (RLS é por linha, não por coluna); nenhuma policy
+nova foi necessária nesta migration.
+
+> Nota de migration ([`20260717090000_profiles_add_atividade_consentimento.sql`](../supabase/migrations/20260717090000_profiles_add_atividade_consentimento.sql)):
+> `restricoes_alimentares` e `condicoes_medicas` **não** foram adicionadas
+> como colunas desta tabela (conforme chegou a ser solicitado numa spec),
+> por contrariar a regra não-negociável de isolar dado sensível de saúde em
+> tabela própria (ver `condicoes_saude` e `restricoes_alimentares` abaixo).
+> `sexo` também não foi renomeado para o par `M`/`F`/`outro` solicitado —
+> os valores atuais já são um superconjunto semântico. Adicionalmente,
+> `aceite_termos_em` foi pedido como NOT NULL, mas isso foi **testado
+> localmente e revertido**: a trigger `handle_new_user()` (que auto-cria
+> `profiles(id)` no signup) passa a falhar contra um NOT NULL sem default,
+> quebrando a criação de conta inteira. A coluna ficou NULLABLE;
+> consentimento obrigatório é enforced pela aplicação. Todos os três
+> desvios foram sinalizados de volta pro `product-spec`.
 
 ### `public.condicoes_saude`
 
@@ -137,6 +164,13 @@ status = 'ativa'` — impede duas metas ativas simultâneas pro mesmo usuário.
 
 RLS: `select_own_goals`, `insert_own_goals`, `update_own_goals`,
 `delete_own_goals` — todas com `auth.uid() = user_id`.
+
+> Nota de spec: uma solicitação recebida em 2026-07-17 pedia `goals` com
+> colunas `prazo_semanas` (int) e `ativa` (bool) em vez de `prazo_data` e
+> `status`. Como a tabela já cumpre a mesma necessidade funcional (uma meta
+> ativa por vez, histórico completo) com um desenho já justificado e em uso,
+> a mudança de nome/tipo **não** foi aplicada unilateralmente — sinalizada
+> de volta pro `product-spec` pra confirmação antes de qualquer rename.
 
 ## Funções e triggers auxiliares
 

@@ -1,22 +1,38 @@
 # docker-compose.yml — ambiente de desenvolvimento local
 #
-# Este compose sobe SOMENTE o backend (FastAPI). O Supabase local
-# (Postgres + Auth + Storage + Studio) é orquestrado pela própria
-# Supabase CLI via `supabase start` — não duplicamos os containers
-# dela aqui.
+# Este compose sobe o backend FastAPI e também um container do
+# Supabase CLI oficial para rodar o ambiente local via `supabase start`.
 #
-# Decisão do devops-engineer: delegamos o Supabase local à CLI
-# oficial (abordagem idiomática) em vez de replicar os containers do
-# Supabase neste compose. Evita divergência de versão entre local e
-# produção e duplicação de manutenção.
-#
-# Fluxo de dev completo:
-#
-#   1) supabase start        # sobe Postgres/Auth/Storage local
-#   2) cp .env.example .env  # preencher com URLs/keys de `supabase status`
-#   3) docker compose up     # sobe o backend com hot reload
+# Fluxo recomendado:
+#   1) cp .env.example .env
+#   2) docker compose up -d supabase
+#   3) docker compose up -d backend
+#   4) supabase status (opcional, para ver URLs e chaves)
 
 services:
+  supabase:
+    image: supabase/cli:latest
+    command: start --ignore-health-check
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "54321:54321"
+      - "54322:54322"
+      - "54323:54323"
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL:-http://127.0.0.1:54321}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-test-anon-key}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-test-service-role-key}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      JWT_SECRET: ${JWT_SECRET:-super-secret-jwt}
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl -fsS http://127.0.0.1:54321/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   backend:
     build:
       context: .
@@ -26,9 +42,11 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL:-http://127.0.0.1:54321}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-test-anon-key}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-test-service-role-key}
     volumes:
       - ./app:/code/app
-    # Permite o container do backend acessar o Supabase local (que
-    # roda fora do compose, via Supabase CLI) através do host.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    depends_on:
+      - supabase
