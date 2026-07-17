@@ -3,9 +3,11 @@
 Dono: `supabase-architect`. Atualizado a cada migration que altera schema.
 
 Migrations de origem deste diagrama:
-[`supabase/migrations/20260716000000_init_profiles_goals.sql`](../supabase/migrations/20260716000000_init_profiles_goals.sql)
+[`supabase/migrations/20260716000000_init_profiles_goals.sql`](../supabase/migrations/20260716000000_init_profiles_goals.sql),
+[`supabase/migrations/20260717090000_profiles_add_atividade_consentimento.sql`](../supabase/migrations/20260717090000_profiles_add_atividade_consentimento.sql),
+[`supabase/migrations/20260717120000_create_pesagens.sql`](../supabase/migrations/20260717120000_create_pesagens.sql)
 e
-[`supabase/migrations/20260717090000_profiles_add_atividade_consentimento.sql`](../supabase/migrations/20260717090000_profiles_add_atividade_consentimento.sql).
+[`supabase/migrations/20260717130000_condicoes_saude_add_gestante.sql`](../supabase/migrations/20260717130000_condicoes_saude_add_gestante.sql).
 
 ## Diagrama
 
@@ -15,6 +17,7 @@ erDiagram
     USERS ||--o| CONDICOES_SAUDE : "1:1 (id = user_id)"
     USERS ||--o| RESTRICOES_ALIMENTARES : "1:1 (id = user_id)"
     USERS ||--o{ GOALS : "1:N (id = user_id)"
+    USERS ||--o{ PESAGENS : "1:N (id = user_id)"
 
     USERS {
         uuid id PK
@@ -37,6 +40,7 @@ erDiagram
     CONDICOES_SAUDE {
         uuid user_id PK_FK "-> auth.users.id, on delete cascade"
         text_array condicoes "default '{}', texto livre — SENSIVEL LGPD art 5 II"
+        bool esta_gestante "NOT NULL default false — SENSIVEL LGPD art 5 II"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -55,6 +59,15 @@ erDiagram
         numeric peso_meta_kg "CHECK 20..400"
         date prazo_data "data alvo, not null"
         text status "CHECK ativa|concluida|cancelada|expirada, default ativa"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    PESAGENS {
+        uuid id PK "default gen_random_uuid()"
+        uuid user_id FK "-> auth.users.id, on delete cascade, indice composto"
+        numeric peso_kg "CHECK 20..400"
+        timestamptz registrada_em "CHECK <= now(), quando a pesagem foi feita (distinto de created_at)"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -117,12 +130,29 @@ do perfil.
 |--------------|---------------|-----------------------------------------------------------------|-----------|
 | `user_id`    | `uuid`        | PK, FK `auth.users(id)` ON DELETE CASCADE                        | Chave de um dado de saúde — nunca exposto sem RLS. |
 | `condicoes`  | `text[]`      | NOT NULL, default `'{}'`                                          | **SENSÍVEL.** Texto livre informado pelo usuário. |
+| `esta_gestante` | `boolean`  | NOT NULL, default `false`                                         | **SENSÍVEL (LGPD art. 5º, II).** Indica gestação atual, autodeclarada. Usada pela elegibilidade do cálculo de IMC (`specs/2026-07-17-calculo-imc.md`). |
 | `created_at` | `timestamptz` | NOT NULL, default `now()`                                        | — |
 | `updated_at` | `timestamptz` | NOT NULL, default `now()`, mantido por trigger                   | — |
 
 RLS: `select_own_condicoes_saude`, `insert_own_condicoes_saude`,
 `update_own_condicoes_saude`, `delete_own_condicoes_saude` — todas com
-`auth.uid() = user_id`.
+`auth.uid() = user_id`. `esta_gestante` não precisou de policy nova (RLS é
+por linha, não por coluna) — ver
+[`20260717130000_condicoes_saude_add_gestante.sql`](../supabase/migrations/20260717130000_condicoes_saude_add_gestante.sql).
+
+> Nota de migration ([`20260717130000_condicoes_saude_add_gestante.sql`](../supabase/migrations/20260717130000_condicoes_saude_add_gestante.sql)):
+> o spec de IMC sugeriu `condicoes_saude` como local de `esta_gestante`, mas
+> pediu confirmação de que a tabela é 1:1 por usuário antes de assumir que
+> uma coluna boolean encaixa (a preocupação era: se fosse "uma linha por
+> condição", um boolean solto não faria sentido). Investigação confirmou
+> que `condicoes_saude` tem `user_id` como **primary key** — 1 linha por
+> usuário, com a lista de condições já vivendo dentro dessa única linha na
+> coluna `condicoes text[]`. Não há conflito estrutural: `esta_gestante`
+> é uma coluna escalar adicional na mesma linha, mesmo padrão já usado em
+> `profiles.aceite_data_sharing_ia`. Confirmado o local sugerido pelo spec,
+> por já ter RLS própria, FK `ON DELETE CASCADE` própria, e por ser a
+> classe correta de sensibilidade (dado de saúde LGPD art. 5º, II) — sem
+> necessidade de criar tabela dedicada só para 1 boolean.
 
 ### `public.restricoes_alimentares`
 
@@ -172,11 +202,43 @@ RLS: `select_own_goals`, `insert_own_goals`, `update_own_goals`,
 > a mudança de nome/tipo **não** foi aplicada unilateralmente — sinalizada
 > de volta pro `product-spec` pra confirmação antes de qualquer rename.
 
+### `public.pesagens`
+
+Histórico de pesagens do usuário (peso + data/hora em que a pesagem foi
+feita). Modelada como **histórico** (múltiplas linhas por usuário, nunca
+sobrescrito) — mesmo padrão de `goals`: uma nova pesagem é sempre um
+`INSERT`; edição corrige a linha específica, exclusão remove a linha
+específica; "peso mais recente" é sempre derivado por
+`ORDER BY registrada_em DESC LIMIT 1`, nunca por uma flag armazenada.
+Consumida pelo módulo de IMC (`specs/2026-07-17-calculo-imc.md`) em
+substituição a `profiles.peso_inicial_kg` (que continua existindo como
+baseline do onboarding, mas deixou de alimentar o cálculo de IMC).
+
+| Coluna          | Tipo            | Constraint                                                              | Nota LGPD |
+|-----------------|-----------------|----------------------------------------------------------------------------|-----------|
+| `id`            | `uuid`          | PK, default `gen_random_uuid()`                                            | — |
+| `user_id`       | `uuid`          | NOT NULL, FK `auth.users(id)` ON DELETE CASCADE                             | — |
+| `peso_kg`       | `numeric(5,2)`  | NOT NULL, CHECK entre 20 e 400                                              | Dado de saúde indireto (peso corporal); acessível só via RLS do próprio usuário. |
+| `registrada_em` | `timestamptz`   | NOT NULL, default `now()`, CHECK `<= now()`                                | Quando a pesagem foi feita (informado pelo usuário, pode ser retroativo). Distinto de `created_at`. |
+| `created_at`    | `timestamptz`   | NOT NULL, default `now()`                                                  | — |
+| `updated_at`    | `timestamptz`   | NOT NULL, default `now()`, mantido por trigger                             | — |
+
+Índice `idx_pesagens_user_id_registrada_em` em `(user_id, registrada_em
+desc)` — suporta tanto a listagem de histórico por usuário quanto a query
+de "pesagem mais recente" (`WHERE user_id = $1 ORDER BY registrada_em DESC
+LIMIT 1`) via index scan puro, sem sort adicional (confirmado localmente
+via `EXPLAIN`). Não há índice isolado em `(user_id)`: como `user_id` é a
+coluna líder do índice composto, ele já cobre queries que filtram só por
+usuário.
+
+RLS: `select_own_pesagens`, `insert_own_pesagens`, `update_own_pesagens`,
+`delete_own_pesagens` — todas com `auth.uid() = user_id`.
+
 ## Funções e triggers auxiliares
 
 - `public.set_updated_at()` — trigger `BEFORE UPDATE` que seta `updated_at
   = now()`. Aplicada em `profiles`, `condicoes_saude`,
-  `restricoes_alimentares` e `goals`.
+  `restricoes_alimentares`, `goals` e `pesagens`.
 - `public.handle_new_user()` (`SECURITY DEFINER`) + trigger
   `on_auth_user_created` em `auth.users` — cria automaticamente a linha de
   `profiles` (só com `id`) no signup. Único ponto desta migration que

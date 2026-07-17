@@ -1,0 +1,58 @@
+# .dockerignore — mantém o contexto de build do backend enxuto.
+# Contexto de build é a raiz do repo; o Dockerfile só precisa de
+# app/requirements.txt e app/.
+
+.git
+.github
+.claude
+
+# Frontend, docs, specs — não usados no build do backend
+web
+docs
+specs
+supabase
+
+# Testes (rodam no CI, não vão pra imagem)
+tests
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+.venv
+venv
+env
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+.coverage.*
+htmlcov
+dist
+build
+
+# Node / Next.js
+node_modules
+.next
+out
+.vercel
+.turbo
+*.tsbuildinfo
+
+# Docs / markdown (não precisam ir pra imagem)
+*.md
+
+# Env e secrets — nunca vão pra imagem
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode
+.idea
+
+# Compose (irrelevante dentro do build)
+docker-compose.yml

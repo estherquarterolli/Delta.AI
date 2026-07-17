@@ -1,0 +1,93 @@
+-- =============================================================================
+-- Migration: condicoes_saude_add_gestante
+-- Autor: supabase-architect
+-- Data: 2026-07-17
+--
+-- Propósito
+--   Migration aditiva sobre public.condicoes_saude (criada em
+--   20260716000000_init_profiles_goals.sql). Adiciona esta_gestante,
+--   necessária pra elegibilidade do cálculo de IMC (ver
+--   specs/2026-07-17-calculo-imc.md, seção "Dependência de schema —
+--   elegibilidade por idade/gestação"): usuárias gestantes não devem
+--   receber uma classificação de IMC de faixa adulta padrão.
+--
+-- Decisão de modelagem — onde esta_gestante mora (investigação obrigatória
+-- antes de decidir, pedida explicitamente pelo spec):
+--
+--   O spec de IMC deixa a decisão final a cargo deste agente e sugere
+--   public.condicoes_saude por consistência com o padrão já estabelecido de
+--   isolar dado de saúde sensível fora de profiles, mas pede pra investigar
+--   se condicoes_saude é 1:1 com o usuário antes de assumir que uma coluna
+--   boolean encaixa.
+--
+--   Investigação (lida diretamente de 20260716000000_init_profiles_goals.sql):
+--   public.condicoes_saude tem `user_id uuid primary key references
+--   auth.users (id)` — ou seja, é 1:1 com o usuário (uma única linha por
+--   usuário), não uma lista de linhas (uma por condição). A "lista de
+--   condições" já vive inteira dentro dessa única linha, na coluna
+--   `condicoes text[]` (array). Isso é o mesmo padrão 1:1 de
+--   public.profiles e public.restricoes_alimentares — nenhuma dessas três
+--   tabelas tem múltiplas linhas por usuário.
+--
+--   Conclusão: a preocupação levantada pelo spec ("se for múltiplas linhas,
+--   um boolean de coluna não encaixa") NÃO se aplica aqui — condicoes_saude
+--   já é 1 linha por usuário, então uma coluna boolean adicional é
+--   estruturalmente idêntica ao que já foi feito em profiles
+--   (aceite_data_sharing_ia) e em condicoes_saude/restricoes_alimentares
+--   (colunas escalares ao lado de uma coluna array, mesma linha). Optamos
+--   por seguir a sugestão do spec e colocar esta_gestante em
+--   condicoes_saude, e não em profiles, porque:
+--     1. Gestação é dado de saúde sensível (LGPD art. 5º, II),
+--        potencialmente mais sensível que peso/altura isoladamente (pode
+--        revelar tentativa de gravidez, tratamento de fertilidade se
+--        cruzado com outros dados) — mesma classe de sensibilidade que já
+--        motivou isolar condicoes_saude de profiles desde a migration
+--        inicial.
+--     2. condicoes_saude já tem RLS própria, own-row, e já tem FK
+--        ON DELETE CASCADE independente — "deletar conta = deletar limpo"
+--        já garantido sem trabalho adicional nesta migration.
+--     3. Não abrimos tabela nova só para 1 boolean: condicoes_saude já é o
+--        lugar certo da taxonomia "dado de saúde sensível, 1:1 por
+--        usuário, fora de profiles" — criar public.dados_gestacionais (ou
+--        similar) seria fragmentação sem ganho, já que não há necessidade
+--        de ciclo de vida, retenção ou consentimento diferente do que
+--        condicoes_saude já recebe.
+--   Alternativa descartada: profiles.esta_gestante. Rejeitada por
+--   contrariar a regra não-negociável do CLAUDE.md ("Dados sensíveis
+--   (condições médicas, fotos) em tabelas separadas") e o precedente já
+--   aberto em 20260717090000_profiles_add_atividade_consentimento.sql
+--   (desvio nº 1), que recusou explicitamente colocar dado de saúde
+--   sensível em profiles pelo mesmo motivo.
+--
+--   esta_gestante boolean not null default false — mesmo padrão de default
+--   seguro/opt-in já usado em profiles.aceite_data_sharing_ia: na ausência
+--   de informação, assume-se "não gestante" (mesmo estado de risco que já
+--   existe hoje, sem regressão — o app não tinha esse dado antes). Sempre
+--   NOT NULL (diferente de aceite_termos_em): não há trigger de
+--   auto-criação de condicoes_saude no signup (diferente de profiles, que
+--   tem handle_new_user()), então não há risco de o INSERT automático
+--   falhar contra um NOT NULL sem valor explícito — a aplicação sempre
+--   fornece (ou aceita o default) ao criar a linha de condicoes_saude.
+--
+-- RLS
+--   Nenhuma policy nova necessária — condicoes_saude já tem RLS habilitada
+--   com policies select/insert/update/delete own-row (auth.uid() =
+--   user_id), criadas em 20260716000000_init_profiles_goals.sql. RLS é por
+--   linha, não por coluna: a coluna nova herda as policies existentes
+--   automaticamente.
+--
+-- Reversibilidade
+--   alter table public.condicoes_saude
+--     drop column if exists esta_gestante;
+--
+-- Idempotência
+--   `add column if not exists` protege contra reaplicação parcial.
+-- =============================================================================
+
+alter table public.condicoes_saude
+  add column if not exists esta_gestante boolean not null default false;
+
+comment on column public.condicoes_saude.esta_gestante is
+  'Indica se a usuária está gestante atualmente, informado pela própria usuária. Usado pelo módulo de IMC (specs/2026-07-17-calculo-imc.md) pra bloquear a classificação de IMC padrão-adulto durante a gestação. Default false (ausência de informação = mesmo risco que já existe hoje, sem regressão). Dado de saúde sensível (LGPD art. 5º, II) — por isso vive em condicoes_saude, não em profiles. Ver decisão de modelagem no header desta migration.';
+
+-- Nenhuma mudança de RLS necessária: ver header desta migration.

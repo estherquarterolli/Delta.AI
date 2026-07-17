@@ -1,0 +1,38 @@
+name: backend-deploy
+
+# Deploy automático do backend no Fly.io a cada push na main que
+# toque arquivos relevantes de backend/infra. Requer o secret
+# FLY_API_TOKEN configurado em Settings > Secrets and variables >
+# Actions (ver docs/deploy.md pra como gerar).
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "app/**"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "fly.toml"
+      - ".github/workflows/backend-deploy.yml"
+
+# Evita deploys sobrepostos: se um push novo chegar enquanto um
+# deploy ainda está rodando, o novo run fica enfileirado (não cancela
+# o deploy em andamento, só evita rodar dois ao mesmo tempo).
+concurrency:
+  group: backend-deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy no Fly.io (delta-ai-api)
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

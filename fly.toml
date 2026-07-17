@@ -1,0 +1,36 @@
+# fly.toml — configuração do backend Delta.AI no Fly.io
+#
+# Nenhum secret aqui. Segredos vivem em `fly secrets set` (ver
+# docs/deploy.md). Região gru (São Paulo) — mais perto do público
+# alvo (Brasil). VM mínima do free tier (256MB, shared CPU, 1 core).
+#
+# auto_stop_machines/auto_start_machines + min_machines_running = 0
+# deixam a VM desligar quando ociosa e ligar sob demanda (economia
+# no free tier — cold start de alguns segundos na primeira request
+# depois de idle).
+
+app = "delta-ai-api"
+primary_region = "gru"
+
+[build]
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    path = "/health"
+    protocol = "http"
+    timeout = "5s"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "256mb"
