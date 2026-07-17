@@ -1,0 +1,5 @@
+# Dependências mínimas do backend (scaffolding inicial).
+# backend-engineer expande conforme os módulos forem implementados
+# (ex.: supabase-py, pydantic-settings, httpx, sentry-sdk, resend).
+fastapi==0.115.0
+uvicorn[standard]==0.32.0

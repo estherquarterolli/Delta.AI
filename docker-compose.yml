@@ -1,0 +1,34 @@
+# docker-compose.yml — ambiente de desenvolvimento local
+#
+# Este compose sobe SOMENTE o backend (FastAPI). O Supabase local
+# (Postgres + Auth + Storage + Studio) é orquestrado pela própria
+# Supabase CLI via `supabase start` — não duplicamos os containers
+# dela aqui.
+#
+# Decisão do devops-engineer: delegamos o Supabase local à CLI
+# oficial (abordagem idiomática) em vez de replicar os containers do
+# Supabase neste compose. Evita divergência de versão entre local e
+# produção e duplicação de manutenção.
+#
+# Fluxo de dev completo:
+#
+#   1) supabase start        # sobe Postgres/Auth/Storage local
+#   2) cp .env.example .env  # preencher com URLs/keys de `supabase status`
+#   3) docker compose up     # sobe o backend com hot reload
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./app:/code/app
+    # Permite o container do backend acessar o Supabase local (que
+    # roda fora do compose, via Supabase CLI) através do host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
